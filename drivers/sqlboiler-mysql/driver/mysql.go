@@ -202,7 +202,8 @@ func (m *MySQLDriver) Columns(schema, tableName string, whitelist, blacklist []s
 			where c.table_name = tc.table_name and c.column_name = kcu.column_name and c.table_schema = kcu.constraint_schema and 
 				(tc.constraint_type = 'PRIMARY KEY' or tc.constraint_type = 'UNIQUE') and
 				(select count(*) from information_schema.key_column_usage where table_schema = kcu.table_schema and constraint_schema = kcu.table_schema and table_name = tc.table_name and constraint_name = tc.constraint_name) = 1
-		) as is_unique
+		) as is_unique,
+	c.column_comment
 	from information_schema.columns as c
 	where table_name = ? and table_schema = ? and c.extra not like '%VIRTUAL%'`
 
@@ -236,7 +237,8 @@ func (m *MySQLDriver) Columns(schema, tableName string, whitelist, blacklist []s
 		var colName, colType, colFullType string
 		var nullable, unique bool
 		var defaultValue *string
-		if err := rows.Scan(&colName, &colFullType, &colType, &defaultValue, &nullable, &unique); err != nil {
+		var colComment string
+		if err := rows.Scan(&colName, &colFullType, &colType, &defaultValue, &nullable, &unique, &colComment); err != nil {
 			return nil, errors.Wrapf(err, "unable to scan for table %s", tableName)
 		}
 
@@ -246,6 +248,7 @@ func (m *MySQLDriver) Columns(schema, tableName string, whitelist, blacklist []s
 			DBType:     colType,
 			Nullable:   nullable,
 			Unique:     unique,
+			Comment:    colComment,
 		}
 
 		if defaultValue != nil && *defaultValue != "NULL" {
@@ -354,8 +357,7 @@ func (m *MySQLDriver) TranslateColumnType(c drivers.Column) drivers.Column {
 	if c.Nullable {
 		switch c.DBType {
 		case "tinyint":
-			// map tinyint(1) to bool if TinyintAsBool is true
-			if !m.tinyIntAsInt && c.FullDBType == "tinyint(1)" {
+			if (!m.tinyIntAsInt && c.FullDBType == "tinyint(1)") || strings.Contains(c.Comment, "tinyint_as_bool") {
 				c.Type = "null.Bool"
 			} else if unsigned {
 				c.Type = "null.Uint8"
@@ -407,7 +409,7 @@ func (m *MySQLDriver) TranslateColumnType(c drivers.Column) drivers.Column {
 		switch c.DBType {
 		case "tinyint":
 			// map tinyint(1) to bool if TinyintAsBool is true
-			if !m.tinyIntAsInt && c.FullDBType == "tinyint(1)" {
+			if (!m.tinyIntAsInt && c.FullDBType == "tinyint(1)") || strings.Contains(c.Comment, "tinyint_as_bool") {
 				c.Type = "bool"
 			} else if unsigned {
 				c.Type = "uint8"
