@@ -378,9 +378,9 @@ func (m *MySQLDriver) TranslateColumnType(c drivers.Column) drivers.Column {
 			}
 		case "int", "integer":
 			if unsigned {
-				c.Type = "null.Uint"
+				c.Type = "null.Uint32"
 			} else {
-				c.Type = "null.Int"
+				c.Type = "null.Int32"
 			}
 		case "bigint":
 			if unsigned {
@@ -430,9 +430,9 @@ func (m *MySQLDriver) TranslateColumnType(c drivers.Column) drivers.Column {
 			}
 		case "int", "integer":
 			if unsigned {
-				c.Type = "uint"
+				c.Type = "uint32"
 			} else {
-				c.Type = "int"
+				c.Type = "int32"
 			}
 		case "bigint":
 			if unsigned {
