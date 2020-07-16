@@ -13,16 +13,8 @@ import (
 	"unicode"
 
 	"github.com/friendsofgo/errors"
-	"github.com/volatiletech/sqlboiler/boil"
-	"github.com/volatiletech/sqlboiler/strmangle"
-)
-
-var (
-	bindAccepts = []reflect.Kind{reflect.Ptr, reflect.Slice, reflect.Ptr, reflect.Struct}
-
-	mut         sync.RWMutex
-	bindingMaps = make(map[string][]uint64)
-	structMaps  = make(map[string]map[string]uint64)
+	"github.com/volatiletech/sqlboiler/v4/boil"
+	"github.com/volatiletech/strmangle"
 )
 
 // Identifies what kind of object we're binding to
@@ -232,35 +224,9 @@ func bind(rows *sql.Rows, obj interface{}, structType, sliceType reflect.Type, b
 		ptrSlice = reflect.Indirect(reflect.ValueOf(obj))
 	}
 
-	var strMapping map[string]uint64
-	var sok bool
-	var mapping []uint64
-	var ok bool
-
-	typKey := makeTypeKey(structType)
-	colsKey := makeColsKey(structType, cols)
-
-	mut.RLock()
-	mapping, ok = bindingMaps[colsKey]
-	if !ok {
-		if strMapping, sok = structMaps[typKey]; !sok {
-			strMapping = MakeStructMapping(structType)
-		}
-	}
-	mut.RUnlock()
-
-	if !ok {
-		mapping, err = BindMapping(structType, strMapping, cols)
-		if err != nil {
-			return err
-		}
-
-		mut.Lock()
-		if !sok {
-			structMaps[typKey] = strMapping
-		}
-		bindingMaps[colsKey] = mapping
-		mut.Unlock()
+	mapping, err := getMappingCache(structType).mapping(cols)
+	if err != nil {
+		return err
 	}
 
 	var oneStruct reflect.Value
@@ -439,30 +405,69 @@ func getBoilTag(field reflect.StructField) (name string, recurse bool) {
 	return nameFragment, true
 }
 
-func makeTypeKey(typ reflect.Type) string {
-	buf := strmangle.GetBuffer()
-	buf.WriteString(typ.String())
-	for i, n := 0, typ.NumField(); i < n; i++ {
-		field := typ.Field(i)
-		buf.WriteString(field.Name)
-		buf.WriteString(field.Type.String())
-	}
-	hash := buf.String()
-	strmangle.PutBuffer(buf)
+var (
+	mappingCachesMu sync.Mutex
+	mappingCaches   = make(map[reflect.Type]*mappingCache)
+)
 
-	return hash
+func getMappingCache(typ reflect.Type) *mappingCache {
+	mappingCachesMu.Lock()
+	defer mappingCachesMu.Unlock()
+
+	cache := mappingCaches[typ]
+	if cache != nil {
+		return cache
+	}
+
+	cache = newMappingCache(typ)
+	mappingCaches[typ] = cache
+
+	return cache
 }
 
-func makeColsKey(typ reflect.Type, cols []string) string {
+type mappingCache struct {
+	typ reflect.Type
+
+	mu          sync.Mutex
+	structMap   map[string]uint64
+	colMappings map[string][]uint64
+}
+
+func newMappingCache(typ reflect.Type) *mappingCache {
+	return &mappingCache{
+		typ:         typ,
+		structMap:   MakeStructMapping(typ),
+		colMappings: make(map[string][]uint64),
+	}
+}
+
+func (b *mappingCache) mapping(cols []string) ([]uint64, error) {
 	buf := strmangle.GetBuffer()
-	buf.WriteString(typ.String())
+	defer strmangle.PutBuffer(buf)
+
 	for _, s := range cols {
 		buf.WriteString(s)
+		buf.WriteByte(0)
 	}
-	hash := buf.String()
-	strmangle.PutBuffer(buf)
 
-	return hash
+	key := buf.Bytes()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	mapping := b.colMappings[string(key)]
+	if mapping != nil {
+		return mapping, nil
+	}
+
+	mapping, err := BindMapping(b.typ, b.structMap, cols)
+	if err != nil {
+		return nil, err
+	}
+
+	b.colMappings[string(key)] = mapping
+
+	return mapping, nil
 }
 
 // Equal is different to reflect.DeepEqual in that it's both less efficient
