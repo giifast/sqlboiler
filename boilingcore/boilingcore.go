@@ -12,10 +12,10 @@ import (
 	"strings"
 
 	"github.com/friendsofgo/errors"
-	"github.com/volatiletech/sqlboiler/drivers"
-	"github.com/volatiletech/sqlboiler/importers"
-	"github.com/volatiletech/sqlboiler/strmangle"
-	"github.com/volatiletech/sqlboiler/templatebin"
+	"github.com/volatiletech/sqlboiler/v4/drivers"
+	"github.com/volatiletech/sqlboiler/v4/importers"
+	"github.com/volatiletech/sqlboiler/v4/templatebin"
+	"github.com/volatiletech/strmangle"
 )
 
 const (
@@ -141,14 +141,17 @@ func (s *State) Run() error {
 		PkgName:           s.Config.PkgName,
 		AddGlobal:         s.Config.AddGlobal,
 		AddPanic:          s.Config.AddPanic,
+		AddSoftDeletes:    s.Config.AddSoftDeletes,
 		NoContext:         s.Config.NoContext,
 		NoHooks:           s.Config.NoHooks,
 		NoAutoTimestamps:  s.Config.NoAutoTimestamps,
 		NoRowsAffected:    s.Config.NoRowsAffected,
 		NoDriverTemplates: s.Config.NoDriverTemplates,
+		NoBackReferencing: s.Config.NoBackReferencing,
 		StructTagCasing:   s.Config.StructTagCasing,
 		TagIgnore:         make(map[string]struct{}),
 		Tags:              s.Config.Tags,
+		RelationTag:       s.Config.RelationTag,
 		Dialect:           s.Dialect,
 		Schema:            s.Schema,
 		LQ:                strmangle.QuoteCharacter(s.Dialect.LQ),
@@ -417,6 +420,10 @@ func (s *State) processTypeReplacements() error {
 		for i := range s.Tables {
 			t := s.Tables[i]
 
+			if !shouldReplaceInTable(t, r) {
+				continue
+			}
+
 			for j := range t.Columns {
 				c := t.Columns[j]
 				if matchColumn(c, r.Match) {
@@ -516,6 +523,22 @@ func columnMerge(dst, src drivers.Column) drivers.Column {
 	}
 
 	return ret
+}
+
+// shouldReplaceInTable checks if tables were specified in types.match in the config.
+// If tables were set, it checks if the given table is among the specified tables.
+func shouldReplaceInTable(t drivers.Table, r TypeReplace) bool {
+	if len(r.Tables) == 0 {
+		return true
+	}
+
+	for _, replaceInTable := range r.Tables {
+		if replaceInTable == t.Name {
+			return true
+		}
+	}
+
+	return false
 }
 
 // initOutFolders creates the folders that will hold the generated output.
